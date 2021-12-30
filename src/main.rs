@@ -1,8 +1,42 @@
+use core::time;
+use std::collections::HashMap;
+use std::thread;
 use crate::epi::Frame;
 use crate::epi::Storage;
 use eframe::{egui, epi};
-use std::convert::TryInto;
-use sysinfo::{NetworkExt, NetworksExt, ProcessExt, System, SystemExt};
+use sysinfo::{ProcessExt, System, SystemExt};
+use proc_maps::{get_process_maps, MapRange, Pid};
+
+fn wait(time: u64) {
+    thread::sleep(time::Duration::from_secs(time));
+}
+
+fn organize(ui: &mut egui::Ui, data: Vec<MapRange>) {
+    let mut organized: HashMap<String, HashMap<usize, usize>> = HashMap::new();
+    for map in data {
+        match map.filename() {
+            Some(x) => {
+                let name = &x.to_str();
+                let _name = &*name.unwrap();
+                if organized.contains_key(_name) {
+                    let mut set = organized.get_mut(_name).unwrap();
+                    set.insert(map.start(), map.size());
+                } else {
+                    organized.insert(_name.to_string(), HashMap::new());
+                }
+            },
+            None => continue
+        }
+    }
+    for (file, map) in organized {
+        ui.collapsing(file, |ui| {
+            for (address, size) in map {
+                ui.label(format!("Starts at {} with size of {} ", address, size));
+            }
+        });
+
+    }
+}
 
 #[derive(Default)]
 struct SpecsGUI {
@@ -34,7 +68,7 @@ impl epi::App for SpecsGUI {
                 for (pid, process) in data {
                     let btn = ui.button(format!("{}/{}", pid, process.name()));
                     if btn.clicked() {
-                        self.pid = *pid;
+                        self.pid = *pid as usize;
                     }
                 }
             })
@@ -47,40 +81,8 @@ impl epi::App for SpecsGUI {
             } else {
                 ui.heading("Stack trace");
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    let process = match remoteprocess::Process::new(self.pid.try_into().unwrap()) {
-                        Ok(x) => x,
-                        Err(e) => {
-                            self.message = e.to_string();
-                            panic!("{}", e)
-                        }
-                    };
-                    let _lock = process.lock();
-
-                    // Create a stack unwind object, and use it to get the stack for each thread
-                    let unwinder = process.unwinder().unwrap();
-                    let symbolicator = process.symbolicator().unwrap();
-                    for thread in process.threads().unwrap().iter() {
-                        ui.label(format!(
-                            "Thread {} - {}",
-                            thread.id().unwrap(),
-                            if thread.active().unwrap() {
-                                "Running"
-                            } else {
-                                "Idle"
-                            }
-                        ));
-                        ui.indent(format!("thread_{:?}_info", self.pid), |ui| {
-                            let _lock = thread.lock().unwrap();
-                            for ip in unwinder.cursor(&thread).unwrap() {
-                                let ip = ip.unwrap();
-                                symbolicator
-                                    .symbolicate(ip, true, &mut |sf| {
-                                        ui.label(format!("{}", sf));
-                                    })
-                                    .unwrap();
-                            }
-                        });
-                    }
+                    let maps = get_process_maps(self.pid as Pid).unwrap();
+                    organize(ui, maps);
                 })
             }
         });

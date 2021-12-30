@@ -7,5 +7,5 @@ version = "0.1.0"
 
 [dependencies]
 eframe = "0.15.0"
-remoteprocess = {version = "0.4.7", features = ["unwind"]}
+proc-maps = "0.2.0"
 sysinfo = "0.22.3"
